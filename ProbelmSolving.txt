@@ -1,0 +1,708 @@
+Q1)
+Why Class A is Broken
+Missing Virtual Destructor in Class A: The primary issue is that the destructor of class A should be virtual. When you delete a pointer to a derived class object through a base class pointer, if the base class's destructor is not virtual, the derived class's destructor will not be called, leading to undefined behavior and potential resource leaks. However, in this specific example, the destructor is already virtual, so this problem does not occur.
+
+Incorrect Destructor Message in Class B: In the implementation of B, the destructor should print "B::~B()" instead of "A::~A()". This discrepancy does not break the program but does not match the typical expected behavior.
+
+Non-virtual Function Issue: The bar function is not declared as virtual in class A. Therefore, when b->bar() is called, it calls A::bar() instead of B::bar(). To fix this, bar should be declared as virtual in class A and overridden in class B to provide polymorphic behavior.
+
+Here is the corrected version of the classes A and B:
+
+#include <iostream>
+
+class A {
+public:
+    A() {
+        std::cout << "A::A()" << std::endl;
+    }
+    virtual ~A() {
+        std::cout << "A::~A()" << std::endl;
+    }
+    virtual void foo() {
+        std::cout << "A::foo()" << std::endl;
+    }
+    virtual void bar() {
+        std::cout << "A::bar()" << std::endl;
+    }
+};
+
+class B : public A {
+public:
+    B() {
+        std::cout << "B::B()" << std::endl;
+    }
+    ~B() override {
+        std::cout << "B::~B()" << std::endl;
+    }
+    void foo() override {
+        std::cout << "B::foo()" << std::endl;
+    }
+    void bar() override {
+        std::cout << "B::bar()" << std::endl;
+    }
+};
+
+int main() {
+    A a;
+    a.foo();
+    a.bar();
+    A* b = new B();
+    b->foo();
+    b->bar();
+    delete b;
+    return 0;
+}
+=========================================================================================================================================================
+Q2)To implement the SyncQueue class using modern C++ synchronization primitives, we'll utilize std::mutex for mutual exclusion, std::condition_variable for blocking and waking up threads, and std::queue to store the elements. The type requirements on T will be that it should be copyable because we need to push and pop elements from the queue.
+
+Here's the implementation of the SyncQueue class:
+
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <stdexcept>
+
+template<typename T>
+class SyncQueue {
+public:
+    // Pushes an element into the queue
+    void push(const T& item) {
+        std::lock_guard<std::mutex> lock(mtx);
+        queue.push(item);
+        cv.notify_one();  // Notify one waiting thread, if any
+    }
+
+    // Pops an element from the queue. It blocks if the queue is empty.
+    T pop() {
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [this] { return !queue.empty(); });  // Wait until queue is not empty
+        T item = queue.front();
+        queue.pop();
+        return item;
+    }
+
+private:
+    std::queue<T> queue;
+    std::mutex mtx;
+    std::condition_variable cv;
+};
+
+// The type requirements on T are that it should be copyable
+// since we need to push and pop elements from the queue.
+Explanation
+std::mutex mtx: A mutex to protect shared access to the queue.
+std::condition_variable cv: A condition variable to block the consumer thread when the queue is empty and wake it up when an element is pushed.
+std::queue<T> queue: The underlying container to store elements.
+push method
+The push method locks the mutex using std::lock_guard to ensure that access to the queue is synchronized.
+It pushes the item into the queue.
+It notifies one waiting thread (if any) that an item has been added to the queue using cv.notify_one().
+pop method
+The pop method locks the mutex using std::unique_lock since we need to use the lock with std::condition_variable.
+It waits on the condition variable cv until the queue is not empty. The predicate [this] { return !queue.empty(); } is used to avoid spurious wake-ups.
+Once the queue is not empty, it retrieves the front element, pops it from the queue, and returns it.
+Type Requirements on T
+The type T must be copyable because:
+
+In the push method, we copy the item into the queue.
+In the pop method, we copy the item from the queue before popping it.
+==========================================================================================================================================================
+Q3)To add a move constructor to the SyncQueue class, we need to modify the class to handle the move semantics. This involves adding a move constructor and possibly a move assignment operator. We also need to ensure that the internal state (the queue) is correctly transferred from one instance to another without deep copying.
+
+Here's the updated implementation of SyncQueue with a move constructor:
+
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <stdexcept>
+#include <utility>
+
+template<typename T>
+class SyncQueue {
+public:
+    // Default constructor
+    SyncQueue() = default;
+
+    // Move constructor
+    SyncQueue(SyncQueue&& other) noexcept {
+        std::lock_guard<std::mutex> lock(other.mtx);
+        queue = std::move(other.queue);
+        // No need to move the mutex and condition_variable since they are not copyable/movable
+    }
+
+    // Move assignment operator
+    SyncQueue& operator=(SyncQueue&& other) noexcept {
+        if (this != &other) {
+            std::lock_guard<std::mutex> lock1(mtx, std::adopt_lock);
+            std::lock_guard<std::mutex> lock2(other.mtx, std::adopt_lock);
+            queue = std::move(other.queue);
+            // No need to move the mutex and condition_variable since they are not copyable/movable
+        }
+        return *this;
+    }
+
+    // Pushes an element into the queue
+    void push(const T& item) {
+        std::lock_guard<std::mutex> lock(mtx);
+        queue.push(item);
+        cv.notify_one();  // Notify one waiting thread, if any
+    }
+
+    // Pops an element from the queue. It blocks if the queue is empty.
+    T pop() {
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [this] { return !queue.empty(); });  // Wait until queue is not empty
+        T item = std::move(queue.front());
+        queue.pop();
+        return item;
+    }
+
+private:
+    std::queue<T> queue;
+    mutable std::mutex mtx;
+    std::condition_variable cv;
+};
+
+// The type requirements on T are that it should be copyable
+// since we need to push and pop elements from the queue.
+
+int main() {
+    // Create a SyncQueue instance
+    SyncQueue<int> q1;
+    q1.push(1);
+    q1.push(2);
+    q1.push(3);
+
+    // Move construct a new SyncQueue instance from q1
+    SyncQueue<int> q2 = std::move(q1);
+
+    // Pop elements from q2
+    while (true) {
+        try {
+            int item = q2.pop();
+            std::cout << item << std::endl;
+        } catch (const std::runtime_error& e) {
+            break;  // Exit loop if queue is empty
+        }
+    }
+
+    return 0;
+}
+
+Explanation
+Move Constructor: The move constructor locks the other queue's mutex and transfers the queue to the new instance using std::move.
+Move Assignment Operator: The move assignment operator locks both this and other queue's mutexes, then moves the queue from other to this. The std::adopt_lock argument indicates that the mutex is already locked.
+std::move: Used to transfer ownership of the queue contents from one instance to another.
+When Move Semantics Give Significant Performance Improvements
+Move semantics can provide significant performance improvements in several cases, particularly when dealing with resource-intensive operations. Here are a few cases:
+
+Large Data Structures: When T is a large data structure, such as a large std::vector, moving it is significantly faster than copying because it only involves transferring the pointers to the data rather than copying the entire data.
+
+Non-Copyable Resources: When T manages non-copyable resources, such as file handles or network sockets, move semantics are necessary because these resources cannot be duplicated.
+
+Efficiency in Resource Management: When managing resources like dynamic memory, moving avoids the overhead of allocating and deallocating memory, as well as copying data. This is especially important for classes like std::unique_ptr that are designed to be moved but not copied.
+
+Containers of Move-Only Types: When working with containers that store move-only types (e.g., std::unique_ptr), move semantics are essential because the elements cannot be copied.
+
+In general, move semantics enhance performance by eliminating unnecessary deep copies, reducing memory usage, and speeding up resource transfers.
+====================================================================================================================================================
+Q4)
+Making a piece of code scalable and fast involves various strategies and considerations, including choosing the right algorithms, optimizing data structures, minimizing contention and synchronization, and efficiently using hardware resources. Here’s a general overview of these concepts:
+
+General Strategies for Scalability and Performance
+Algorithmic Efficiency:
+
+Choose algorithms with optimal time and space complexity.
+Use profiling tools to identify bottlenecks and focus on optimizing hot paths.
+Data Locality:
+
+Organize data to maximize cache utilization and minimize cache misses.
+Prefer contiguous memory allocation for frequently accessed data.
+Parallelism:
+
+Exploit parallelism by breaking tasks into smaller, independent sub-tasks that can be executed concurrently.
+Use parallel processing libraries and frameworks (e.g., OpenMP, Intel TBB, CUDA for GPU parallelism).
+Concurrency:
+
+Use multi-threading to perform multiple operations concurrently.
+Ensure proper synchronization to avoid data races and deadlocks.
+Immutable Data Structures
+Definition: Immutable data structures do not change after they are created. Any modification results in a new instance of the data structure.
+Benefits:
+Thread Safety: They are inherently thread-safe as concurrent reads do not require synchronization.
+Simplified Debugging: Reduced side effects make the code easier to reason about and debug.
+Optimizations: Functional programming techniques and compiler optimizations can be more aggressive.
+Drawbacks:
+Performance Overhead: Creating new instances can be expensive in terms of time and memory.
+Lock-Free Data Structures
+Definition: Lock-free data structures use atomic operations to ensure consistency without using locks.
+Benefits:
+Reduced Contention: Avoid the overhead and contention associated with locking mechanisms.
+Scalability: Better scalability in multi-threaded environments as threads do not block each other.
+Drawbacks:
+Complexity: Designing and implementing lock-free data structures is complex and error-prone.
+Limited Use Cases: Not all problems can be efficiently solved with lock-free structures.
+std::shared_ptr and Performance
+Definition: std::shared_ptr is a smart pointer that maintains a reference count to manage the lifetime of a shared object.
+Benefits:
+Automatic Memory Management: Simplifies resource management and prevents memory leaks.
+Drawbacks:
+Reference Counting Overhead: Incrementing and decrementing the reference count incurs atomic operations, which can be costly in multi-threaded contexts.
+Cache Coherence Issues: Frequent updates to the reference count can cause cache invalidation, leading to performance degradation.
+Memory Overhead: Shared pointers have additional memory overhead due to the control block.
+Issues with Computation on Multiple Cores/Processors
+Data Races and Synchronization:
+
+Concurrent access to shared resources must be synchronized to prevent data races, which can lead to undefined behavior.
+Proper synchronization mechanisms (e.g., mutexes, condition variables) are necessary but can introduce contention and reduce performance.
+Load Balancing:
+
+Uneven distribution of work across cores can lead to some cores being underutilized while others are overloaded.
+Dynamic load balancing techniques can help distribute work more evenly.
+False Sharing:
+
+Occurs when threads on different cores modify variables that reside on the same cache line, causing excessive cache coherency traffic.
+Aligning data to cache line boundaries can mitigate false sharing.
+Cache Coherency:
+
+Maintaining cache coherency across multiple cores can be costly, especially in write-intensive applications.
+Optimizing for data locality and minimizing shared data can reduce cache coherency overhead.
+Scalability Limits:
+
+Amdahl’s Law highlights that the speedup of a program is limited by the sequential portion of the code.
+Efforts to parallelize code must focus on minimizing the sequential part to achieve better scalability.
+=====================================================================================================================================================
+Q5)
+The Composite Design Pattern is commonly used to represent tree structures. This pattern is particularly useful for modeling part-whole hierarchies and allows clients to treat individual objects and compositions of objects uniformly.
+
+Composite Design Pattern
+Structure
+Component: An abstract class or interface that declares the interface for objects in the composition.
+Leaf: Represents leaf objects in the composition. A leaf has no children.
+Composite: Represents a node in the composition that can have children. Implements child-related operations in the Component interface.
+Example
+Let's illustrate this with a simple example of a file system, where directories can contain files or other directories.
+#include <iostream>
+#include <vector>
+#include <memory>
+
+// Component
+class FileSystemNode {
+public:
+    virtual ~FileSystemNode() = default;
+    virtual void display(int depth = 0) const = 0;
+};
+
+// Leaf
+class File : public FileSystemNode {
+public:
+    File(const std::string& name) : name(name) {}
+    void display(int depth = 0) const override {
+        std::cout << std::string(depth, '-') << name << std::endl;
+    }
+private:
+    std::string name;
+};
+
+// Composite
+class Directory : public FileSystemNode {
+public:
+    Directory(const std::string& name) : name(name) {}
+    void add(std::shared_ptr<FileSystemNode> node) {
+        children.push_back(node);
+    }
+    void display(int depth = 0) const override {
+        std::cout << std::string(depth, '-') << name << std::endl;
+        for (const auto& child : children) {
+            child->display(depth + 2);
+        }
+    }
+private:
+    std::string name;
+    std::vector<std::shared_ptr<FileSystemNode>> children;
+};
+
+int main() {
+    auto root = std::make_shared<Directory>("root");
+    auto home = std::make_shared<Directory>("home");
+    auto user = std::make_shared<Directory>("user");
+    
+    auto file1 = std::make_shared<File>("file1.txt");
+    auto file2 = std::make_shared<File>("file2.txt");
+    auto file3 = std::make_shared<File>("file3.txt");
+
+    user->add(file1);
+    user->add(file2);
+    home->add(user);
+    home->add(file3);
+    root->add(home);
+
+    root->display();
+
+    return 0;
+}
+=======================================================================================================================================================
+
+Q6)
+To refactor the code and improve it, we can take advantage of modern C++ features such as smart pointers, the std::variant type, std::visit, and improved error handling with exceptions. We'll also use standard library headers instead of C-style headers and modernize the syntax.
+
+Here's the refactored code:
+#include <iostream>
+#include <string>
+#include <memory>
+#include <variant>
+#include <vector>
+#include <stdexcept>
+#include <cstdio>
+#include <fstream>
+
+class InvalidOperation : public std::runtime_error {
+public:
+    InvalidOperation() : std::runtime_error("Invalid operation") {}
+};
+
+class InvalidExpression : public std::runtime_error {
+public:
+    InvalidExpression() : std::runtime_error("Invalid expression") {}
+};
+
+class DivisionByZero : public std::runtime_error {
+public:
+    DivisionByZero() : std::runtime_error("Division by zero") {}
+};
+
+class Expression {
+public:
+    using ExpressionPtr = std::shared_ptr<Expression>;
+
+    // Constructors
+    Expression(int value)
+        : value(value), operation(""), done(false) {}
+
+    Expression(int left, const std::string& operation, int right)
+        : value({left, right}), operation(operation), done(false) {
+        validateOperation();
+    }
+
+    Expression(ExpressionPtr left, const std::string& operation, ExpressionPtr right)
+        : expression({left, right}), operation(operation), done(false) {
+        validateOperation();
+    }
+
+    // Evaluate method
+    int evaluate() {
+        if (!done) {
+            done = true;
+            if (!operation.empty()) {
+                const auto& [left, right] = expression;
+                if (operation == "+") {
+                    res = left->evaluate() + right->evaluate();
+                } else if (operation == "-") {
+                    res = left->evaluate() - right->evaluate();
+                } else if (operation == "*") {
+                    res = left->evaluate() * right->evaluate();
+                } else if (operation == "/") {
+                    int rightValue = right->evaluate();
+                    if (rightValue == 0) {
+                        throw DivisionByZero();
+                    }
+                    res = left->evaluate() / rightValue;
+                }
+            } else {
+                res = std::get<int>(value);
+            }
+        }
+        return res;
+    }
+
+    // Dump method
+    void dump(std::ostream& os) const {
+        if (!operation.empty()) {
+            const auto& [left, right] = expression;
+            os << '(';
+            left->dump(os);
+            os << ')';
+            os << operation;
+            os << '(';
+            right->dump(os);
+            os << ')';
+        } else {
+            os << std::get<int>(value);
+        }
+    }
+
+private:
+    std::variant<int, std::pair<ExpressionPtr, ExpressionPtr>> value;
+    std::pair<ExpressionPtr, ExpressionPtr> expression;
+    std::string operation;
+    bool done;
+    int res;
+
+    void validateOperation() {
+        if (operation != "+" && operation != "-" && operation != "*" && operation != "/") {
+            throw InvalidOperation();
+        }
+    }
+};
+
+// Copy function
+Expression::ExpressionPtr copy(const Expression::ExpressionPtr& expr) {
+    if (!expr->operation.empty()) {
+        const auto& [left, right] = expr->expression;
+        return std::make_shared<Expression>(copy(left), expr->operation, copy(right));
+    } else {
+        return std::make_shared<Expression>(std::get<int>(expr->value));
+    }
+}
+
+int main() {
+    try {
+        auto e1 = std::make_shared<Expression>(
+            std::make_shared<Expression>(20, "*", 8), "/", std::make_shared<Expression>(6));
+        std::cout << e1->evaluate() << std::endl;
+
+        auto e2 = std::make_shared<Expression>(
+            std::make_shared<Expression>(20, "-", 8), "/", std::make_shared<Expression>(0));
+        std::cout << e2->evaluate() << std::endl;
+    } catch (const DivisionByZero&) {
+        std::cout << "nan" << std::endl;
+    }
+
+    auto e3 = copy(e1);
+    std::cout << e3->evaluate() << std::endl;
+
+    std::ofstream file("expression.txt");
+    if (file.is_open()) {
+        e1->dump(file);
+        file.close();
+    }
+
+    return 0;
+}
+
+Benefits
+Safety: Improved exception handling and memory management.
+Readability: More modern and readable C++ syntax.
+Maintainability: Easier to maintain and extend the code.
+This refactored code is more robust, easier to understand, and leverages modern C++ features for better performance and safety.
+===============================================================================================================================================
+Q7)Why is UNIX signal handling so tricky, especially in a multithreaded application?
+
+UNIX signal handling can be particularly tricky in multithreaded applications due to several factors, including the asynchronous nature of signals, the potential for race conditions, and the interactions between signals and threads. Here are the primary reasons why signal handling is challenging in this context:
+
+Asynchronous Nature of Signals
+Asynchronous Arrival: Signals can arrive at any time, interrupting the normal flow of program execution. This makes it difficult to predict and handle signals safely.
+Interrupting Code Execution: Signals can interrupt the execution of a thread, potentially leaving shared resources in an inconsistent state. If a signal handler modifies shared data, it can lead to race conditions and data corruption.
+Signal Handlers and Safety
+Restricted Functions: Signal handlers are limited to calling only async-signal-safe functions. These are functions that are guaranteed to be safe to call from within a signal handler. Many standard library functions are not async-signal-safe, restricting what can be safely done in a handler.
+Reentrancy Issues: If a signal handler calls a non-async-signal-safe function, and the interrupted code was also using that function, it can lead to undefined behavior. This is particularly problematic in multithreaded applications where functions might be concurrently accessed by multiple threads.
+Interaction with Threads
+Signal Delivery to Threads: In a multithreaded application, signals can be delivered to any thread in the process. This can complicate the design, as you need to ensure that the correct thread handles the signal.
+Signal Masking: Each thread has its own signal mask, which determines which signals it can receive. Managing signal masks across multiple threads adds complexity.
+Synchronization Issues: Signal handlers may need to interact with other threads or coordinate with the main program flow. This requires careful synchronization to avoid race conditions, but many synchronization primitives are not safe to use in signal handlers.
+Handling Specific Scenarios
+Thread Creation and Termination: Creating or terminating threads can affect signal handling. For example, if a signal is sent to a thread that has just terminated, it might not be handled correctly.
+Synchronization Primitives: Using mutexes or condition variables inside a signal handler is unsafe and can lead to deadlocks or undefined behavior. This limits how signals can be coordinated with other parts of the program.
+Example Problems
+Race Conditions: If a signal handler and the main program both access shared data without proper synchronization, it can lead to race conditions.
+Deadlocks: If a signal handler tries to lock a mutex that is already locked by the interrupted thread, it can cause a deadlock.
+Resource Management: Properly managing resources (e.g., file descriptors, memory) in the presence of asynchronous signals requires careful design to avoid leaks or corruption.
+Best Practices for Signal Handling in Multithreaded Applications
+Minimize Work in Handlers: Do as little as possible in the signal handler. Set a flag or write to a pipe and handle the signal in a safe context.
+Use Async-Signal-Safe Functions: Only call functions that are safe to use in signal handlers.
+Signal Masks: Use pthread_sigmask to control which threads can receive which signals, ensuring signals are handled by appropriate threads.
+Synchronization: If a signal needs to notify the main thread, use mechanisms like sigwait or signalfd to handle signals synchronously in a specific thread, avoiding the need for handlers to directly modify shared data.
+Example of Safer Signal Handling
+#include <signal.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+volatile sig_atomic_t sigusr1_flag = 0;
+
+void signal_handler(int sig) {
+    if (sig == SIGUSR1) {
+        sigusr1_flag = 1;
+    }
+}
+
+void* thread_func(void* arg) {
+    while (1) {
+        if (sigusr1_flag) {
+            printf("SIGUSR1 received\n");
+            sigusr1_flag = 0;
+        }
+        // Simulate work
+        sleep(1);
+    }
+    return NULL;
+}
+
+int main() {
+    struct sigaction sa;
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+
+    if (sigaction(SIGUSR1, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, thread_func, NULL) != 0) {
+        perror("pthread_create");
+        exit(EXIT_FAILURE);
+    }
+
+    while (1) {
+        // Main thread work
+        sleep(2);
+        pthread_kill(thread, SIGUSR1);
+    }
+
+    pthread_join(thread, NULL);
+    return 0;
+}
+===============================================
+Q7)
+Implementing an asynchronous I/O dispatcher that's gentle on process resources can be done using the epoll API available on Linux, which is more efficient than select or poll for a large number of file descriptors. epoll scales better and is more suitable for high-performance applications.
+
+Here’s an overview of how to implement an asynchronous I/O dispatcher using epoll:
+
+Steps to Implement an Asynchronous I/O Dispatcher
+Create an Epoll Instance:
+
+Use epoll_create1 to create an epoll instance.
+Add File Descriptors to Epoll:
+
+Use epoll_ctl with EPOLL_CTL_ADD to add file descriptors that you want to monitor.
+Specify the events you are interested in (e.g., EPOLLIN for read, EPOLLOUT for write).
+Wait for Events:
+
+Use epoll_wait to wait for events on the monitored file descriptors.
+This call blocks until one or more file descriptors become ready for the specified I/O operations.
+Handle Events:
+
+When epoll_wait returns, iterate through the list of ready file descriptors and handle the events (read/write).
+Modify or Remove File Descriptors:
+
+Use epoll_ctl with EPOLL_CTL_MOD to modify file descriptors or EPOLL_CTL_DEL to remove them.
+Example Code
+Here is a simplified example of an asynchronous I/O dispatcher using epoll:
+
+#include <iostream>
+#include <sys/epoll.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <cstring>
+#include <vector>
+
+class AsyncIODispatcher {
+public:
+    AsyncIODispatcher() {
+        epoll_fd = epoll_create1(0);
+        if (epoll_fd == -1) {
+            perror("epoll_create1");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    ~AsyncIODispatcher() {
+        close(epoll_fd);
+    }
+
+    void add_fd(int fd, uint32_t events) {
+        epoll_event event;
+        event.data.fd = fd;
+        event.events = events;
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &event) == -1) {
+            perror("epoll_ctl: add");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    void modify_fd(int fd, uint32_t events) {
+        epoll_event event;
+        event.data.fd = fd;
+        event.events = events;
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &event) == -1) {
+            perror("epoll_ctl: mod");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    void remove_fd(int fd) {
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr) == -1) {
+            perror("epoll_ctl: del");
+            exit(EXIT_FAILURE);
+        }
+        close(fd);
+    }
+
+    void run() {
+        const int MAX_EVENTS = 10;
+        epoll_event events[MAX_EVENTS];
+
+        while (true) {
+            int num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+            if (num_events == -1) {
+                perror("epoll_wait");
+                exit(EXIT_FAILURE);
+            }
+
+            for (int i = 0; i < num_events; ++i) {
+                if (events[i].events & EPOLLIN) {
+                    handle_read(events[i].data.fd);
+                } else if (events[i].events & EPOLLOUT) {
+                    handle_write(events[i].data.fd);
+                }
+            }
+        }
+    }
+
+private:
+    int epoll_fd;
+
+    void handle_read(int fd) {
+        char buffer[1024];
+        ssize_t count = read(fd, buffer, sizeof(buffer));
+        if (count == -1) {
+            perror("read");
+            remove_fd(fd);
+        } else if (count == 0) {
+            std::cout << "Closed connection on descriptor " << fd << std::endl;
+            remove_fd(fd);
+        } else {
+            std::cout << "Read " << count << " bytes: " << std::string(buffer, count) << std::endl;
+            // Re-arm the descriptor for further reading
+            modify_fd(fd, EPOLLIN);
+        }
+    }
+
+    void handle_write(int fd) {
+        const char *message = "Hello from epoll!";
+        ssize_t count = write(fd, message, strlen(message));
+        if (count == -1) {
+            perror("write");
+            remove_fd(fd);
+        } else {
+            std::cout << "Wrote " << count << " bytes" << std::endl;
+            // Re-arm the descriptor for further writing
+            modify_fd(fd, EPOLLOUT);
+        }
+    }
+};
+
+int main() {
+    AsyncIODispatcher dispatcher;
+
+    // Example: Adding stdin to epoll for reading
+    int stdin_fd = fileno(stdin);
+    dispatcher.add_fd(stdin_fd, EPOLLIN);
+
+    dispatcher.run();
+
+    return 0;
+}
