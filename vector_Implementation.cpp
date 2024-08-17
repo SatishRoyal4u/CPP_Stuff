@@ -68,7 +68,8 @@ class vector
         }
         
         T* newarr = new int[capacity];
-        for(auto i =0; i < m_size; i++)
+        uint size = capacity < m_size ? capacity : m_size;
+        for(auto i =0; i < size; i++)
         {
             newarr[i] =m_arr[i];
         }
@@ -79,6 +80,11 @@ class vector
         
     }
     
+    void resize(int size)
+    {
+        reserve(size);
+        m_size = size;
+    }
     void push_back(const T& value)
     {
         if(m_capacity == 0)
@@ -121,6 +127,14 @@ int main() {
 	    cout<<"v.size():"<<v.size()<<endl;
 	    cout<<"v.capacity():"<<v.capacity()<<endl;
 	    cout<<"v.empty():"<<v.empty()<<endl;
+	    v.resize(3);
+	    cout<<"After resizing: vector size is set to "<<v.size()<<endl;
+	    cout<<v.size()<<endl;
+	    for(auto& i : v)
+	    {
+	        cout<<i<<endl;
+	    }
+	    
 	}
 	
 	{
